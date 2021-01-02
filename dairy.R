@@ -1,8 +1,12 @@
 ## --------------------------------------------------------------------
 #load pyloseq and metadata
-
+#bacteria
 load("/Volumes/efs/CANR/Ansci/D\'Amico\ Lab/Langsun_las17015/2.\ Bethlehem\ project/Bethlehem2020/Bacteria/dada2/phyloseq.RData")
 
+#fungi
+load("/Volumes/efs/CANR/Ansci/D\'Amico\ Lab/Langsun_las17015/2.\ Bethlehem\ project/Bethlehem2020/fungi/dada2/phyloseq.RData")
+#remove sample with 0 read
+ps<-prune_samples(sample_sums(ps)>0, ps)
 
 ## --------------------------------------------------------------------
 #libraries
@@ -20,21 +24,30 @@ library(reshape)
 library(ggsignif)
 library(pairwiseAdonis)
 library(indicspecies)
+library(dendextend)
+library(cowplot)
+library(scales)
+library(RColorBrewer)
 
 ## --------------------------------------------------------------------
 #dairy alpha
 
 ps.dairy<-subset_samples(ps,source=="dairy")
+ps.dairy1<-subset_samples(ps.dairy, sampletype!="cheese")
+ps.dairy2<-subset_samples(ps.dairy, day=="60")
+ps.dairy<-merge_phyloseq(ps.dairy1,ps.dairy2)
 
-p = plot_richness(ps.dairy, x="sampletype", measures=c("Shannon", "Simpson"))
-p$data$sampletype <- as.character(p$data$sampltype)
+
+p = plot_richness(ps.dairy, x="sampletype", measures=c("Shannon"))
+p$data$sampletype <- as.character(p$data$sampletype)
+p$data$sampletype[p$data$sampletype=="cheese"] <- "cheese_d60"
 p$data$sampletype <- factor(p$data$sampletype, 
                             levels=c("rawmilk","filtered_milk","milk_before_ripening",
                                      "milk_stored_overnight","ripened_milk","mixed_milk",
-                                     "whey","cheese_curd","cheese"))
+                                     "whey","cheese_curd","cheese_d60"))
 
-p1 = p + geom_boxplot() + 
-  theme(axis.title=element_blank(),axis.text.x = element_text(angle = 270),legend.position = "none",panel.background = element_rect(fill = 'white', colour = 'black'))
+p4 = p + geom_boxplot() + theme_bw() + 
+  theme(axis.title=element_blank(),axis.text.x = element_text(angle = -45),legend.position = "none",panel.background = element_rect(fill = 'white', colour = 'black'))
 
 
 ## --------------------------------------------------------------------
@@ -42,20 +55,37 @@ p1 = p + geom_boxplot() +
 
 prop.dairy <- transform_sample_counts(ps.dairy, function(otu) otu/sum(otu))
 
-ord.nmds.bray <- ordinate(prop.dairy, method="NMDS", distance="bray")
+ord.pcoa.bray <- ordinate(prop.dairy, method="PCoA", distance="bray")
 
-p = plot_ordination(prop.dairy, ord.nmds.bray, color="sampletype")
+p = plot_ordination(prop.dairy, ord.pcoa.bray, color="sampletype")
+p$data$sampletype <- as.character(p$data$sampletype)
+p$data$sampletype[p$data$sampletype=="cheese"] <- "cheese_d60"
 p$data$sampletype <- factor(p$data$sampletype, 
                             levels=c("rawmilk","filtered_milk","milk_before_ripening",
                                      "milk_stored_overnight","ripened_milk","mixed_milk",
-                                     "whey","cheese_curd","cheese"))
+                                     "whey","cheese_curd","cheese_d60"))
 
-p2 = p + theme(legend.text=element_text(size=8),legend.title = element_blank(),panel.background = element_rect(fill = 'white', colour = 'black'), panel.grid=element_blank())
+p5 = p + theme_bw() + 
+  theme(legend.title=element_blank(),legend.text = element_text(size=10)) + 
+  ylab("PCoA 1 (13.6%)") + 
+  xlab("PCoA 2 (33.7%)")
+
+
+#save(p1, file = "p1.RData") 
+#save(p2, file = "p2.RData") 
+#save(p3, file = "p3.RData") 
+#save(p4, file = "p4.RData") 
+#save(p5, file = "p5.RData") 
+#save(p6, file = "p6.RData") 
+#fig3 <- plot_grid(p1, p2, p3, p4, p5, p6,
+#                  labels = c("A", "B","C","D","E","F"),
+#                  ncol = 3, nrow = 2, rel_widths = c(0.7,1.2,0.7))
+#ggsave(fig3, file="~/Desktop/fig3.jpeg",height = 9, width = 14)
+
 
 
 ## --------------------------------------------------------------------
 #dairy bar plot
-
 merge.dairy <- merge_samples(ps.dairy, "sampletype")
 merge2.dairy <- tax_glom(merge.dairy, "Genus")
 prop.merge.dairy <- transform_sample_counts(merge2.dairy, function(otu) otu/sum(otu))
@@ -63,110 +93,149 @@ melt.dairy <- psmelt(prop.merge.dairy)
 
 melt.dairy1<-melt.dairy
 melt.dairy1$Genus <- as.character(melt.dairy1$Genus)
-melt.dairy1$Genus[melt.dairy1$Abundance < 0.01] <- "< 1% abund."
+melt.dairy1$Genus[melt.dairy1$Abundance < 0.02] <- "All others (1-2%)"
+melt.dairy1$Genus[melt.dairy1$Abundance < 0.01] <- "<1% abun."
 melt.dairy1$Genus[is.na(melt.dairy1$Genus)] <- "unclassified_bacteria"
+#for fungi
+#melt.dairy1$Genus <- gsub('g__', '', melt.dairy1$Genus)
 melt.dairy1$Genus <- reorder(melt.dairy1$Genus, -melt.dairy1$Abundance)
 
+melt.dairy1$Sample[melt.dairy1$Sample == "cheese"] <- "cheese_d60"
 melt.dairy1$Sample <- factor(melt.dairy1$Sample, 
                     c("rawmilk","filtered_milk","milk_before_ripening",
                       "milk_stored_overnight","ripened_milk","mixed_milk",
-                      "whey","cheese_curd","cheese"))
+                      "whey","cheese_curd","cheese_d60"))
 
 library(randomcoloR)
 d = length(unique(melt.dairy1$Genus))
 palette <- distinctColorPalette(d)
 
-p.s3 <- ggplot(melt.dairy1, aes(x=Sample, y = Abundance, fill = Genus)) +
-  geom_bar(stat = "identity") +
-  scale_fill_manual(values = palette) +
-  theme(axis.text.x = element_text(vjust=0.5, size=12, angle = 270),axis.title = element_text(size=12),legend.text=element_text(size=12),legend.key.size = unit(0.4, "cm"), legend.title = element_blank(),title = element_text(size=12,face = "bold"),panel.background = element_blank(), panel.grid=element_blank(), axis.line=element_line('black')) + guides(fill = guide_legend(ncol = 2)) +  ylab("Relative Abundance (Genera > 1%) \n") + xlab("Dairy samples") 
+p2 <- ggplot(melt.dairy1, aes(x=Sample, y = Abundance, fill = Genus)) +
+  geom_bar(stat = "identity") + 
+  scale_fill_manual(values = palette) + theme_bw() +
+  theme(axis.text.x = element_text(vjust=0.5, size=11, angle = 270),
+        axis.title.x = element_blank(),
+        legend.text=element_text(size=10),
+        legend.title = element_blank()) + 
+  guides(fill = guide_legend(ncol = 2)) +
+  ylab("Relative Abundance")
+
+#save(p1, file = "p1.RData") 
+#save(p2, file = "p2.RData") 
+#legend2 <- get_legend(p2)
+#fig4<-plot_grid(p1+theme(legend.position = "none"),
+#                legend1,
+#                p2+theme(legend.position = "none"),
+#                labels = c("A", "","B"),
+#                legend2,nrow = 2,ncol = 2,rel_widths = c(1,0.7))
+#
+#ggsave(fig4, file="~/Desktop/fig4.jpeg",height = 12, width = 13)
 
 
 ## --------------------------------------------------------------------
-#dairy top20 ASV
+#cheese top50 ASV
+
+ps.cheese<-subset_samples(ps,sampletype=="cheese")
+
+top <- names(sort(taxa_sums(ps.cheese), decreasing=TRUE))[1:20]
+ps.top <- transform_sample_counts(ps.cheese, function(otu) otu/sum(otu))
+ps.top <- prune_taxa(top, ps.top)
 
 
-top20 <- names(sort(taxa_sums(ps.dairy), decreasing=TRUE))[1:20]
-ps.top20 <- transform_sample_counts(ps.dairy, function(otu) otu/sum(otu))
-ps.top20 <- prune_taxa(top20, ps.top20)
+dend <- as.dendrogram(hclust(dist(t(otu_table(ps.top)))))
+dend_data <- dendro_data(dend)
+segment_data <- with(
+  segment(dend_data), 
+  data.frame(x = y, y = x, xend = yend, yend = xend))
 
-top20.melt <- psmelt(ps.top20) 
+#height settings
+asv_pos_table <- with(
+  dend_data$labels, 
+  data.frame(y_center = x, OTU = as.character(label), height = 1))
 
-top20.new <- top20.melt
-top20.new$Abundance_per <- (top20.melt$Abundance)*100
+asv_axis_limits <- with(
+  asv_pos_table, 
+  c(min(y_center - 0.5 * height), max(y_center + 0.5 * height))
+) + 0.1 * c(-1, 1)
 
-top20.new$sampletype <- factor(top20.new$sampletype, 
-                             c("rawmilk","filtered_milk","milk_before_ripening",
-                               "milk_stored_overnight","ripened_milk","mixed_milk",
-                               "whey","cheese_curd","cheese"))
+#dendrogram
+p.dendro2=ggplot(segment_data) + 
+  geom_segment(aes(x = x, y = y, xend = xend, yend = yend)) + 
+  scale_x_reverse(expand = c(0, 0)) + 
+  scale_y_continuous(breaks = asv_pos_table$y_center, 
+                     labels = asv_pos_table$OTU, 
+                     limits = asv_axis_limits, 
+                     expand = c(0, 0)) +
+  labs(x = "", y = "", colour = "", size = "") +
+  theme(axis.ticks = element_blank(),axis.text = element_blank(),axis.line = element_blank())
 
-heatmap_top20 <- ggplot(data = top20.new, mapping = aes(x = sample,y = OTU,fill = Abundance_per)) + 
+#heatmap dataframe
+top.melt <- psmelt(ps.top) 
+
+top.new <- top.melt
+top.new$Abundance_per <- (top.melt$Abundance)*100
+
+top.new$section <- factor(top.new$section,c("core","middlesection","rindsection","rind"))
+top.new$day <- factor(top.new$day,c("0","4","7","14","21","44","60"))
+
+#dataframe for heatmap
+top.new1<-left_join(top.new,asv_pos_table,by="OTU")
+
+#bacteria
+#heatmap dairy databse 
+species<-read.table(file="/Volumes/efs/CANR/Ansci/D\'Amico\ Lab/Langsun_las17015/2.\ Bethlehem\ project/Bethlehem2020/Bacteria/db_dairy/asv.txt",header = T)
+asv_pos_table<-left_join(asv_pos_table,species,by="OTU")
+
+#fungi
+species<-as.data.frame(tax_table(ps.top))
+species$Species <- paste(species$Genus,species$Species)
+species$Species <- gsub('g__', '', species$Species)
+species$Species <- gsub('s__', '', species$Species)
+species$OTU <- rownames(species)
+asv_pos_table<-left_join(asv_pos_table,species,by="OTU")
+
+
+myPalette <- RColorBrewer::brewer.pal(5, "Set1")
+
+cheese.heatmap2 <- ggplot(data = top.new1, mapping = aes(x = day,y = y_center,fill = Abundance_per,height=height)) + 
   geom_tile() + 
   scale_fill_viridis_c(option = 'D', trans = "log10",  breaks = c(0.01, 0.1, 1, 10)) + 
-  facet_grid(Family~sampletype,switch = "both", scales = "free", space = "free") + 
+  facet_grid(.~section,switch = "both", scales = "free", space = "free") + 
   labs(fill = "% relative abundance") +
-  theme(axis.text.x = element_blank(),axis.text.y = element_text(size=8),axis.title = element_blank(),legend.title = element_text(size = 8),legend.text = element_text(size = 8),strip.placement = "outside", strip.background = element_blank(),strip.text.x= element_text(angle = 270),strip.text.y.left = element_text(angle = 0))
+  scale_y_continuous(breaks = asv_pos_table[, "y_center"], 
+                     labels = asv_pos_table$Species,
+                     position = "right",
+                     limits = asv_axis_limits, 
+                     expand = c(0, 0)) +
+  theme(axis.ticks.y = element_blank(),
+        axis.text.x = element_text(angle=270),
+        axis.text.y = element_text(colour = myPalette[asv_pos_table$Phylum]),
+        axis.title = element_blank(),
+        strip.placement = "outside", 
+        strip.background = element_blank())
 
 
+p1 = plot_grid(p.dendro1,p.dendro2,labels = c("A","B"),nrow = 2,align = "hv")
+p2 = plot_grid(cheese.heatmap1,cheese.heatmap2,labels = c("",""),nrow = 2,align = "hv")
 
-cheese.heat<-subset(top20.new,top20.new$sampletype=="cheese")
-cheese.heat$section <- factor(cheese.heat$section,c("core","middlesection","rindsection","rind"))
-cheese.heat$day <- factor(cheese.heat$day,c("0","4","7","14","21","44","60"))
-
-
-cheese.heatmap <- ggplot(data = cheese.heat, mapping = aes(x = day,y = OTU,fill = Abundance_per)) + 
-  geom_tile() + 
-  scale_fill_viridis_c(option = 'D', trans = "log10",  breaks = c(0.01, 0.1, 1, 10)) + 
-  facet_grid(Family~section,switch = "both", scales = "free", space = "free") + 
-  labs(fill = "% relative abundance") +
-  theme(axis.text.y = element_text(size=8),axis.title = element_blank(),legend.title = element_text(size = 8),legend.text = element_text(size = 8),strip.placement = "outside", strip.background = element_blank(),strip.text.x= element_text(angle = 270),strip.text.y.left = element_text(angle = 0))
-
-## --------------------------------------------------------------------
-#dairy cheese bar
-
-ps.cheese <- subset_samples(ps,sampletype=="cheese")
-merge.cheese <- tax_glom(ps.cheese, "Genus")
-prop.merge.cheese <- transform_sample_counts(merge.cheese, function(otu) otu/sum(otu))
-melt.cheese <- psmelt(prop.merge.cheese)
-
-melt.cheese1<-melt.cheese
-melt.cheese1$Genus <- as.character(melt.cheese1$Genus)
-melt.cheese1$Genus[melt.cheese1$Abundance < 0.01] <- "< 1% abund."
-melt.cheese1$Genus[is.na(melt.cheese1$Genus)] <- "unclassified_bacteria"
-melt.cheese1$Genus <- reorder(melt.cheese1$Genus, -melt.cheese1$Abundance)
+p1 = plot_grid(p.dendro1,cheese.heatmap1+theme(axis.text.y = element_blank(),legend.position = "none"),
+               labels = c("A"),nrow = 1,
+               align = "h",axis="bt",
+               rel_widths = c(1,4))
+p2 = plot_grid(p.dendro2,cheese.heatmap2+theme(axis.text.y = element_blank(),legend.position = "none"),
+               labels = c("B"),nrow = 1,
+               align = "h",axis="bt",
+               rel_widths = c(1,4))
 
 
-palette <- c(#"all others"="grey",
-             "< 1% abund."="antiquewhite",
-             #"Acinetobacter"="#ED2E49",
-             #"Ruminococcaceae_UCG-005"="#45A6D1",
-             #"Corynebacterium_1"="#468423",
-             "Lactococcus"="#885EA5",
-             #"Kocuria"="#EA7C52",
-             "Lactobacillus"="#F3D01F",
-             "Brachybacterium" = "#B5664C",
-             #"Staphylococcus"="#EB65AF",
-             "Brevibacterium"= "#6EAB97",
-             "Streptomyces"="#8FCC14",
-             #"Pseudonocardia"="#6A8ACA",
-             "Leuconostoc"="#EC9E8E",
-             "Streptococcus"="#D8A52F",
-             "Chryseobacterium"="#C1D82F",
-             "Enterococcus"="#14C20C",
-             "Actinomyces"="#0CC2BF",
-             "Stenotrophomonas"="#837AF0"
-             )
-
-melt.cheese1$day <- factor(melt.cheese1$day,c("0","4","7","14","21","44","60"))
-melt.cheese1$section <- factor(melt.cheese1$section,c("core","middlesection","rindsection","rind"))
-
-p.s4 <- ggplot(melt.cheese1, aes(x=day, y = Abundance, fill = Genus)) +
-  geom_bar(stat = "identity") +
-  scale_fill_manual(values = palette) +
-  facet_grid(section~.,switch = "both", scales = "free", space = "free") + 
-  theme(axis.text.x = element_text(vjust=0.5, size=12),axis.title = element_text(size=12),legend.text=element_text(size=12),legend.key.size = unit(0.4, "cm"), legend.title = element_blank(),title = element_text(size=12,face = "bold"),panel.background = element_blank(), panel.grid=element_blank(), axis.line=element_line('black'))  +  ylab("Relative Abundance (Genera > 1%) \n") + xlab("Cheese samples") 
-
-
+#save(p.dendro1, file = "p.dendro1.RData") 
+#save(p.dendro2, file = "p.dendro2.RData") 
+#save(cheese.heatmap1, file = "cheese.heatmap1.RData") 
+#save(cheese.heatmap2, file = "cheese.heatmap2.RData") 
+fig5<-plot_grid(p1,p2,
+                align="h",axis = "tb",
+                ncol = 2, rel_widths = c(0.3,1))
+#ggsave(fig5, file="~/Desktop/fig52.jpeg",height = 12, width = 14)
 
 ## --------------------------------------------------------------------
 #common and unique asv between cheese sections
@@ -191,13 +260,28 @@ upset(fromList(listInput),order.by = "freq")
 #cluster dendrogram
 
 prop.cheese<-transform_sample_counts(ps.cheese, function(otu) otu/sum(otu))
-sample_names(prop.cheese)<-(sample_data(prop.cheese))$sample
-bray <- phyloseq::distance(prop.cheese, method = "bray")
+sample_names(prop.cheese)<-paste((sample_data(prop.cheese))$section,(sample_data(prop.cheese))$day)
 
-cheese.hclust<- hclust(bray, method="average")
-plot(cheese.hclust)
+#unifrac
+set.seed(1)
+unifrac <- phyloseq::distance(prop.cheese, method = "unifrac",weighted=T)
+cheese.hclust2<- hclust(unifrac, method="average")
+hcd <- as.dendrogram(cheese.hclust2)
 
+labels(hcd) = sub("middlesection", " ms", labels(hcd))
+labels(hcd) = sub("rindsection", " rs", labels(hcd))
+labels(hcd) = sub("rind", " rind", labels(hcd))
+labels(hcd) = sub("core", " core", labels(hcd))
 
+dend1 <- hcd %>%
+  set("branches_k_color", k=4) %>% set("labels_cex", 0.6) %>% set("branches_lwd", 0.6)
+p3=ggplot(dend1, horiz = TRUE,theme = theme_minimal())+ 
+  theme(axis.text.y = element_blank(),axis.title = element_blank())
+
+dend2 <- hcd %>%
+  set("branches_k_color", k=2) %>% set("labels_cex", 0.6) %>% set("branches_lwd", 0.6)
+p6=ggplot(dend2, horiz = TRUE,theme = theme_minimal())+ 
+  theme(axis.text.y = element_blank(),axis.title = element_blank())
 
 
 
